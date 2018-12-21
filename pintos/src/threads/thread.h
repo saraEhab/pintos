@@ -5,7 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "synch.h"
-#include "fixed_point.h"
+//#include "fixed_point.h"
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -96,7 +96,7 @@ struct thread {
     struct lock *lock_waiting;          /* Lock waiting on for priority donation. */
 
     int nice;                           /* Niceness for 4.4BSD scheduler. */
-    fixed_t recent_cpu;                 /* Recent CPU for 4.4BSD scheduler. */
+   // fixed_t recent_cpu;                 /* Recent CPU for 4.4BSD scheduler. */
 
     int64_t wakeup_ticks;               /* Wakeup ticks used by timer sleep */
 
@@ -196,4 +196,5 @@ bool thread_alive(int pid);
 
 
 #endif /* threads/thread.h */
+
 

@@ -1,4 +1,4 @@
-#include <stdbool.h>
+#include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include <user/syscall.h>
@@ -13,21 +13,9 @@
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
-#include "userprog/syscall.h"
 
 #define MAX_ARGS 3
-#define USER_VADDR_BOTTOM ((void *) 0x08048000) /*VADDR : virtual address ,
- * this value is the last right value the virtual address can take*/
-
-
-struct lock filesys_lock;
-
-
-struct process_file {
-    struct file *file;
-    int fd;
-    struct list_elem elem;
-};
+#define USER_VADDR_BOTTOM ((void *) 0x08048000) /*VADDR : virtual address*/
 
 int process_add_file(struct file *f);
 
@@ -39,10 +27,18 @@ int user_to_kernel_ptr(const void *vaddr);
 
 static void syscall_handler(struct intr_frame *);
 
+struct lock filesys_lock;
+
+struct process_file {
+    struct file *file;
+    int fd;
+    struct list_elem elem;
+};
+
+
 void
 syscall_init(void) {
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
-    lock_init(&filesys_lock);
 }
 
 /*handles system calls by terminating the process
@@ -91,10 +87,37 @@ syscall_handler(struct intr_frame *f UNUSED) {
             arg[0] = user_to_kernel_ptr((const void *) arg[0]);
             f->eax = open((const char *) arg[0]);
             break;
-
+        case SYS_FILESIZE:
+            get_arg(f, &arg[0], 1);
+            f->eax = filesize(arg[0]);
+            break;
+        case SYS_READ:
+            get_arg(f, &arg[0], 3);
+            //check_valid_buffer((void *) arg[1], (unsigned) arg[2]);
+            arg[1] = user_to_kernel_ptr((const void *) arg[1]);
+            f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
+            break;
+        case SYS_WRITE:
+            get_arg(f, &arg[0], 3);
+            //check_valid_buffer((void *) arg[1], (unsigned) arg[2]);
+            arg[1] = user_to_kernel_ptr((const void *) arg[1]);
+            f->eax = write(arg[0], (const void *) arg[1],
+                           (unsigned) arg[2]);
+            break;
+        case SYS_SEEK:
+            get_arg(f, &arg[0], 2);
+            seek(arg[0], (unsigned) arg[1]);
+            break;
+        case SYS_TELL:
+            get_arg(f, &arg[0], 1);
+            f->eax = tell(arg[0]);
+            break;
+        case SYS_CLOSE:
+            get_arg(f, &arg[0], 1);
+            close(arg[0]);
+            break;
     }
 }
-
 /*add a file to the current thread , whereas the thread has to know the number of files it opens*/
 int process_add_file(struct file *fileStruct) {
     /*create and init new fd_element*/
@@ -201,6 +224,156 @@ int open(const char *file) {
     lock_release(&filesys_lock);
     return fileDescriptor;
 }
+/* get the file*/
+struct file* process_get_file (int fd)
+{
+    struct thread *t = thread_current();
+    struct list_elem *e;
+
+    for (e = list_begin (&t->file_list); e != list_end (&t->file_list);
+         e = list_next (e))
+    {
+        struct process_file *pf = list_entry (e, struct process_file, elem);
+        if (fd == pf->fd)
+        {
+            return pf->file;
+        }
+    }
+    return NULL;
+}
+
+
+/* first get the file
+ * then calculate its size
+ * if the file not found then error*/
+int filesize (int fd)
+{
+    lock_acquire(&filesys_lock);
+    struct file *f = process_get_file(fd);
+    if (!f)
+    {
+        lock_release(&filesys_lock);
+        return ERROR;
+    }
+    int size = file_length(f);
+    lock_release(&filesys_lock);
+    return size;
+}
+
+/*Reads size bytes from the file open as fd into buffer. Returns the number of bytes actually
+read (0 at end of file), or -1 if the file could not be read (due to a condition other than end
+of file). Fd 0 reads from the keyboard using input_getc().*/
+
+int read (int fd, void *buffer, unsigned size)
+{
+    if (fd == STDIN_FILENO)
+    {
+        unsigned i;
+        uint8_t* local_buffer = (uint8_t *) buffer;
+        for (i = 0; i < size; i++)
+        {
+            local_buffer[i] = input_getc();
+        }
+        return size;
+    }
+    lock_acquire(&filesys_lock);
+    struct file *f = process_get_file(fd);
+    if (!f)
+    {
+        lock_release(&filesys_lock);
+        return ERROR;
+    }
+    int bytes = file_read(f, buffer, size);
+    lock_release(&filesys_lock);
+    return bytes;
+}
+
+/*Writes size bytes from buffer to the open file fd. Returns the number of bytes actually
+written,Fd 1 writes to the console. Your code to write to the console should write all of buffer in
+one call to putbuf()*/
+int write (int fd, const void *buffer, unsigned size)
+{
+    if (fd == STDOUT_FILENO)
+    {
+        putbuf(buffer, size);
+        return size;
+    }
+    lock_acquire(&filesys_lock);
+    struct file *f = process_get_file(fd);
+    if (!f)
+    {
+        lock_release(&filesys_lock);
+        return ERROR;
+    }
+    int bytes = file_write(f, buffer, size);
+    lock_release(&filesys_lock);
+    return bytes;
+}
+
+/*Changes the next byte to be read or written in open file fd to position, expressed in bytes
+from the beginning of the file. (Thus, a position of 0 is the file's start.)*/
+void seek (int fd, unsigned position)
+{
+    lock_acquire(&filesys_lock);
+    struct file *f = process_get_file(fd);
+    if (!f)
+    {
+        lock_release(&filesys_lock);
+        return;
+    }
+    file_seek(f, position);
+    lock_release(&filesys_lock);
+}
+
+/*Returns the position of the next byte to be read or written in open file fd, expressed in
+bytes from the beginning of the file.*/
+unsigned tell (int fd)
+{
+    lock_acquire(&filesys_lock);
+    struct file *f = process_get_file(fd);
+    if (!f)
+    {
+        lock_release(&filesys_lock);
+        return ERROR;
+    }
+    off_t offset = file_tell(f);
+    lock_release(&filesys_lock);
+    return offset;
+}
+
+void process_close_file (int fd)
+{
+    struct thread *t = thread_current();
+    struct list_elem *next, *e = list_begin(&t->file_list);
+
+    while (e != list_end (&t->file_list))
+    {
+        next = list_next(e);
+        struct process_file *pf = list_entry (e, struct process_file, elem);
+        if (fd == pf->fd || fd == CLOSE_ALL)
+        {
+            file_close(pf->file);
+            list_remove(&pf->elem);
+            free(pf);
+            if (fd != CLOSE_ALL)
+            {
+                return;
+            }
+        }
+        e = next;
+    }
+}
+
+/*Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file
+descriptors, as if by calling this function for each one.*/
+void close (int fd)
+{
+    lock_acquire(&filesys_lock);
+    process_close_file(fd);
+    lock_release(&filesys_lock);
+}
+
+
 
 /*check if all bytes within range are correct
  * for strings + buffers*/

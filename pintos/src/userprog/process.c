@@ -89,6 +89,7 @@ start_process(void *file_name_) {
 int
 process_wait(tid_t child_tid UNUSED) {
 
+    /*get the child which has this tid*/
     struct child_process *childProcess = get_child_process(child_tid);
     if (!childProcess) {
         /*pid doesn't refer to a direct child of the calling process*/
@@ -96,6 +97,7 @@ process_wait(tid_t child_tid UNUSED) {
     }
     /*parent process was waiting for this child before
      * parent can wait for any child just once*/
+    /*this is not the 1st call for that child*/
     if (childProcess->wait) {
         return ERROR;
     }

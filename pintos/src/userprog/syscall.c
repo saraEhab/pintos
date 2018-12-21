@@ -1,4 +1,4 @@
-#include "userprog/syscall.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <syscall-nr.h>
 #include <user/syscall.h>
@@ -13,9 +13,21 @@
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 
 #define MAX_ARGS 3
-#define USER_VADDR_BOTTOM ((void *) 0x08048000) /*VADDR : virtual address*/
+#define USER_VADDR_BOTTOM ((void *) 0x08048000) /*VADDR : virtual address ,
+ * this value is the last right value the virtual address can take*/
+
+
+struct lock filesys_lock;
+
+
+struct process_file {
+    struct file *file;
+    int fd;
+    struct list_elem elem;
+};
 
 int process_add_file(struct file *f);
 
@@ -30,6 +42,7 @@ static void syscall_handler(struct intr_frame *);
 void
 syscall_init(void) {
     intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
+    lock_init(&filesys_lock);
 }
 
 /*handles system calls by terminating the process
@@ -41,53 +54,55 @@ syscall_handler(struct intr_frame *f UNUSED) {
     int arg[MAX_ARGS];
     check_valid_ptr((const void *) f->esp);
     switch (*(int *) f->esp) {
-        case SYS_HALT: {
+        case SYS_HALT:   /* Halt the operating system. */
             halt();
             break;
-        }
-        case SYS_EXIT: {
+
+        case SYS_EXIT:   /* Terminate this process. */
             get_arg(f, &arg[0], 1);
             exit(arg[0]);
             break;
-        }
-        case SYS_EXEC: {
+
+        case SYS_EXEC:  /* Start another process. */
             get_arg(f, &arg[0], 1);
             arg[0] = user_to_kernel_ptr((const void *) arg[0]);
             f->eax = exec((const char *) arg[0]);
             break;
-        }
-        case SYS_WAIT: {
+
+        case SYS_WAIT:  /* Wait for a child process to die. */
             get_arg(f, &arg[0], 1);
             f->eax = wait(arg[0]);
             break;
-        }
-        case SYS_CREATE: {
+
+        case SYS_CREATE:  /* Create a file. */
             get_arg(f, &arg[0], 2);
             arg[0] = user_to_kernel_ptr((const void *) arg[0]);
             f->eax = create((const char *) arg[0], (unsigned) arg[1]);
             break;
-        }
-        case SYS_REMOVE: {
+
+        case SYS_REMOVE: /* Delete a file. */
             get_arg(f, &arg[0], 1);
             arg[0] = user_to_kernel_ptr((const void *) arg[0]);
             f->eax = remove((const char *) arg[0]);
             break;
-        }
-        case SYS_OPEN: {
+
+        case SYS_OPEN: /* Open a file. */
             get_arg(f, &arg[0], 1);
             arg[0] = user_to_kernel_ptr((const void *) arg[0]);
             f->eax = open((const char *) arg[0]);
             break;
-        }
+
     }
 }
 
-
+/*add a file to the current thread , whereas the thread has to know the number of files it opens*/
 int process_add_file(struct file *fileStruct) {
+    /*create and init new fd_element*/
     struct process_file *processFile = malloc(sizeof(struct process_file));
     processFile->file = fileStruct;
     processFile->fd = thread_current()->fd;
     thread_current()->fd++;
+    /* add this fd_element to this thread fd_list*/
     list_push_back(&thread_current()->file_list, &processFile->elem);
     return processFile->fd;
 }
@@ -109,7 +124,7 @@ void exit(int status) {
     struct thread *currentThread = thread_current();
     //check if there is a parent waiting for it
     if (thread_alive(currentThread->parent)) {
-        currentThread->cp->status = status;  /*cp means child process*/
+        currentThread->cp->status = status;  /*set the status of the current process child*/
     }
     printf("%s: exit(%d)\n", currentThread->name, status);
 
@@ -125,8 +140,8 @@ void exit(int status) {
 /*parent process can't return form exec until
  * the child process successfully loaded its executable*/
 pid_t exec(const char *cmd_line) {
-    pid_t pid = process_execute(cmd_line);
-    struct child_process *cp = get_child_process(pid);
+    pid_t pid = process_execute(cmd_line);/* create child process to execute cmd*/
+    struct child_process *cp = get_child_process(pid); /*get the created child*/
     ASSERT(cp);
 
     /*waiting for child process to load its executable*/
@@ -193,7 +208,8 @@ int open(const char *file) {
  * is a user virtual address or not
  * if not exit with error*/
 void check_valid_ptr(const void *vaddr) {
-    /*is_user_vaddr : Returns true if VADDR is a user virtual address. */
+    /*is_user_vaddr : Returns true if VADDR is a user virtual address.
+     * second condition checks if the vaddr is within the range of the addresses*/
     if (!is_user_vaddr(vaddr) || vaddr < USER_VADDR_BOTTOM) {
         exit(ERROR);
     }
@@ -238,7 +254,6 @@ struct child_process *add_child_process(int pid) {
     cp->load = NOT_LOADED;
     cp->wait = false;
     cp->exit = false;
-    lock_init(&cp->wait_lock);
     list_push_back(&thread_current()->child_list,
                    &cp->elem);
     return cp;
@@ -259,7 +274,7 @@ struct child_process *get_child_process(int pid) {
     return NULL;
 }
 
-
+/*remove the child process after finishing -> when return back to its parent*/
 void remove_child_process(struct child_process *cp) {
     list_remove(&cp->elem);
     free(cp);

@@ -8,18 +8,21 @@
 #define LOAD_FAIL 2
 
 struct child_process {
+    struct list_elem elem;
     int pid;
     int load;
     bool wait;
     bool exit;
     int status;
-    struct lock wait_lock;
-    struct list_elem elem;
+
 };
 
-struct child_process* add_child_process (int pid);
-struct child_process* get_child_process (int pid);
-void remove_child_process (struct child_process *cp);
+struct child_process *add_child_process(int pid);
+
+struct child_process *get_child_process(int pid);
+
+void remove_child_process(struct child_process *cp);
+
 void syscall_init(void);
 
 #endif /* userprog/syscall.h */

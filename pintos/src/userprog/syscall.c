@@ -266,7 +266,7 @@ of file). Fd 0 reads from the keyboard using input_getc().*/
 
 int read (int fd, void *buffer, unsigned size)
 {
-    if (fd == STDIN_FILENO)
+    if (fd == 0)
     {
         unsigned i;
         uint8_t* local_buffer = (uint8_t *) buffer;
@@ -293,7 +293,7 @@ written,Fd 1 writes to the console. Your code to write to the console should wri
 one call to putbuf()*/
 int write (int fd, const void *buffer, unsigned size)
 {
-    if (fd == STDOUT_FILENO)
+    if (fd == 1)
     {
         putbuf(buffer, size);
         return size;

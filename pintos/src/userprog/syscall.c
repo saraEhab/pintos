@@ -93,13 +93,13 @@ syscall_handler(struct intr_frame *f UNUSED) {
             break;
         case SYS_READ:
             get_arg(f, &arg[0], 3);
-            //check_valid_buffer((void *) arg[1], (unsigned) arg[2]);
+            check_valid_buffer((void *) arg[1], (unsigned) arg[2]);
             arg[1] = user_to_kernel_ptr((const void *) arg[1]);
             f->eax = read(arg[0], (void *) arg[1], (unsigned) arg[2]);
             break;
         case SYS_WRITE:
             get_arg(f, &arg[0], 3);
-            //check_valid_buffer((void *) arg[1], (unsigned) arg[2]);
+            check_valid_buffer((void *) arg[1], (unsigned) arg[2]);
             arg[1] = user_to_kernel_ptr((const void *) arg[1]);
             f->eax = write(arg[0], (const void *) arg[1],
                            (unsigned) arg[2]);
@@ -451,4 +451,15 @@ struct child_process *get_child_process(int pid) {
 void remove_child_process(struct child_process *cp) {
     list_remove(&cp->elem);
     free(cp);
+}
+
+void check_valid_buffer (void* buffer, unsigned size)
+{
+  unsigned i;
+  char* local_buffer = (char *) buffer;
+  for (i = 0; i < size; i++)
+    {
+      check_valid_ptr((const void*) local_buffer);
+      local_buffer++;
+    }
 }
